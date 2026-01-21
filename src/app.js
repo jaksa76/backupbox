@@ -15,7 +15,6 @@ const el = {
 const state = {
   worker: null,
   folderHandles: [], // Array of FileSystemDirectoryHandle
-  sharedWorkerPort: null,
   isWorking: false,
 };
 
@@ -186,19 +185,6 @@ async function removeFolder(index) {
 }
 
 // --- Worker Logic ---
-function initSharedWorker() {
-  if (typeof SharedWorker !== 'undefined') {
-    try {
-      const sw = new SharedWorker('/src/shared-worker.js');
-      state.sharedWorkerPort = sw.port;
-      state.sharedWorkerPort.onmessage = handleWorkerMessage;
-      state.sharedWorkerPort.start && state.sharedWorkerPort.start();
-      console.log('SharedWorker initialized');
-    } catch (err) {
-      console.warn('Could not start SharedWorker', err);
-    }
-  }
-}
 
 function handleWorkerMessage(ev) {
   const msg = ev.data || {};
@@ -217,19 +203,13 @@ function handleWorkerMessage(ev) {
       updateUI();
       break;
     case 'error':
-      if (state.sharedWorkerPort && msg.message && msg.message.startsWith('No directory handle')) {
-        console.warn('SharedWorker failed to accept handles. Falling back to dedicated worker.');
-        state.sharedWorkerPort = null; // Disable SV
-        startBackup(); // Retry with dedicated worker (it will use the else block)
-        return;
-      }
       state.isWorking = false;
       setStatus(`Error: ${msg.message}`);
       updateUI();
       break;
     case 'started':
       state.isWorking = true;
-      setStatus('Syncing files...');
+      setStatus('Syncing files (via Service Worker)...');
       updateUI();
       break;
     case 'stopped':
@@ -259,11 +239,15 @@ async function startBackup() {
   setStatus('Starting backup process...');
   console.log('Sending handles to worker:', state.folderHandles.map(h => h.name));
 
-  if (state.sharedWorkerPort) {
-    // Send specifically named dirHandles property
-    state.sharedWorkerPort.postMessage({ cmd: 'startWatch', dirHandles: [...state.folderHandles] });
+  // Use Service Worker if available
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({
+      cmd: 'startWatch',
+      dirHandles: [...state.folderHandles]
+    });
   } else {
-    // Fallback to dedicated worker
+    // Fallback to dedicated worker if SW is not controlling the page yet
+    setStatus('Service Worker not ready. Falling back to dedicated worker.');
     if (!state.worker) {
       state.worker = new Worker('/src/worker.js');
       state.worker.onmessage = handleWorkerMessage;
@@ -273,9 +257,10 @@ async function startBackup() {
 }
 
 function stopBackup() {
-  if (state.sharedWorkerPort) {
-    state.sharedWorkerPort.postMessage({ cmd: 'stopWatch' });
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ cmd: 'stopWatch' });
   }
+
   if (state.worker) {
     state.worker.terminate();
     state.worker = null;
@@ -306,15 +291,19 @@ el.stopBtn.addEventListener('click', stopBackup);
   }
 
   updateUI();
-  initSharedWorker();
   registerSW();
 })();
 
 async function registerSW() {
   if ('serviceWorker' in navigator) {
     try {
-      await navigator.serviceWorker.register('/sw.js');
-      console.log('Service Worker registered');
+      // Register with type: 'module' to allow imports in sw.js
+      const registration = await navigator.serviceWorker.register('/sw.js', { type: 'module' });
+      console.log('Service Worker registered', registration);
+
+      // Listen for messages from the Service Worker
+      navigator.serviceWorker.addEventListener('message', handleWorkerMessage);
+
     } catch (e) {
       console.error('SW registration failed', e);
     }
