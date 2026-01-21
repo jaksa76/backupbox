@@ -1,0 +1,12 @@
+{
+  "name": "backupbox-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "http-server -c-1 -p 8080",
+    "serve": "npm run start"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
