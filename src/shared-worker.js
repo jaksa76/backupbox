@@ -1,4 +1,5 @@
-// SharedWorker that counts files and reports progress to connected ports
+import { countAllDirs } from './file-counter.js';
+
 const ports = new Set();
 let currentDirHandles = [];
 let watchInterval = null;
@@ -6,34 +7,6 @@ const WATCH_MS = 30_000; // 30s interval
 
 function broadcast(msg) {
   for (const p of ports) p.postMessage(msg);
-}
-
-async function countDir(handle) {
-  let counted = 0;
-  async function walk(h) {
-    try {
-      // iterate over values in the directory handle
-      for await (const entry of h.values()) {
-        if (entry.kind === 'file') {
-          counted++;
-        } else if (entry.kind === 'directory') {
-          await walk(entry);
-        }
-      }
-    } catch (err) {
-      console.warn(`[SharedWorker] Could not scan subdirectory in ${h.name}:`, err);
-    }
-  }
-  await walk(handle);
-  return counted;
-}
-
-async function countAllDirs(handles) {
-  let totalCount = 0;
-  for (const handle of handles) {
-    totalCount += await countDir(handle);
-  }
-  return totalCount;
 }
 
 self.onconnect = function (e) {
