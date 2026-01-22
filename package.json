@@ -3,8 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "http-server -c-1 -p 8080",
-    "serve": "npm run start",
+    "start": "fleabox --dev --apps-dir /workspaces/",
     "test": "vitest"
   },
   "devDependencies": {
