@@ -298,7 +298,7 @@ async function registerSW() {
   if ('serviceWorker' in navigator) {
     try {
       // Register with type: 'module' to allow imports in sw.js
-      const registration = await navigator.serviceWorker.register('/sw.js', { type: 'module' });
+      const registration = await navigator.serviceWorker.register('/backupbox/sw.js', { type: 'module' });
       console.log('Service Worker registered', registration);
 
       // Listen for messages from the Service Worker

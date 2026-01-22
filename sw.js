@@ -1,15 +1,15 @@
-import { countAllDirs } from './src/file-counter.js';
+import { countAllDirs } from '/backupbox/src/file-counter.js';
 
 const CACHE_NAME = 'backupbox-v2';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/src/app.js',
-  '/src/styles.css',
-  '/src/worker.js',
-  '/icons/icon-192.svg',
-  '/icons/icon-512.svg',
+  '/backupbox/',
+  '/backupbox/index.html',
+  '/backupbox/manifest.json',
+  '/backupbox/src/app.js',
+  '/backupbox/src/styles.css',
+  '/backupbox/src/worker.js',
+  '/backupbox/icons/icon-192.svg',
+  '/backupbox/icons/icon-512.svg',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'
 ];
 
@@ -51,7 +51,7 @@ self.addEventListener('fetch', event => {
     }).catch(() => {
       // Fallback for offline access if asset not in cache
       if (event.request.mode === 'navigate') {
-        return caches.match('/index.html');
+        return caches.match('/backupbox/index.html');
       }
     })
   );
