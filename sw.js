@@ -1,13 +1,11 @@
-import { countAllDirs } from '/backupbox/src/file-counter.js';
-
-const CACHE_NAME = 'backupbox-v2';
+const CACHE_NAME = 'backupbox-v3';
 const ASSETS = [
   '/backupbox/',
   '/backupbox/index.html',
   '/backupbox/manifest.json',
   '/backupbox/src/app.js',
   '/backupbox/src/styles.css',
-  '/backupbox/src/worker.js',
+  '/backupbox/src/backup-engine.js',
   '/backupbox/icons/icon-192.svg',
   '/backupbox/icons/icon-512.svg',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'
@@ -57,11 +55,12 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// --- Background Logic (formerly SharedWorker) ---
+// --- Background Backup Scheduling ---
+// Note: Service Workers can't access FileSystemHandles via postMessage
+// So we schedule backups and notify the app to run them
 
-let currentDirHandles = [];
-let watchInterval = null;
-const WATCH_MS = 30_000; // 30s interval
+let backupTimeout = null;
+const BACKUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes between rescans
 
 async function broadcast(msg) {
   const clients = await self.clients.matchAll();
@@ -70,73 +69,38 @@ async function broadcast(msg) {
   }
 }
 
+async function triggerBackup() {
+  console.log('[ServiceWorker] Triggering backup in app...');
+  await broadcast({ type: 'triggerBackup' });
+}
+
 self.addEventListener('message', async (event) => {
   const data = event.data || {};
-  if (!data.cmd) return;
-
-  // Command: Count files immediately
-  if (data.cmd === 'count') {
-    try {
-      const handles = data.dirHandles || (data.dirHandle ? [data.dirHandle] : []);
-      console.log(`[ServiceWorker] Received count command for ${handles.length} folders`);
-
-      if (handles.length > 0) {
-        // Report progress via side-channel if needed, but here we just wait
-        const counted = await countAllDirs(handles);
-        console.log(`[ServiceWorker] Count finished: ${counted} files`);
-
-        // Reply to the specific client that asked
-        event.source.postMessage({ type: 'done', result: { count: counted } });
-        // Or broadcast completion? Usually better to just reply or broadcast.
-        // Let's broadcast to keep UI in sync across tabs
-        broadcast({ type: 'done', result: { count: counted } });
-      } else {
-        event.source.postMessage({ type: 'error', message: 'No directory handles provided for count.' });
-      }
-    } catch (err) {
-      event.source.postMessage({ type: 'error', message: String(err) });
-    }
+  console.log('[ServiceWorker] Received message:', data);
+  
+  if (!data.cmd) {
+    console.warn('[ServiceWorker] Message has no cmd property');
+    return;
   }
 
-  // Command: Start periodic watch
-  if (data.cmd === 'startWatch') {
-    if (data.dirHandles && Array.isArray(data.dirHandles)) {
-      currentDirHandles = data.dirHandles;
+  // Command: Schedule next backup
+  if (data.cmd === 'scheduleNextBackup') {
+    const delayMs = data.delayMs || BACKUP_INTERVAL_MS;
+    console.log(`[ServiceWorker] Scheduling next backup in ${delayMs}ms`);
+    
+    if (backupTimeout) {
+      clearTimeout(backupTimeout);
     }
-
-    console.log(`[ServiceWorker] startWatch for ${currentDirHandles.length} folders`);
-
-    if (currentDirHandles.length === 0) {
-      event.source.postMessage({ type: 'error', message: 'No directory handles provided for watch.' });
-      return;
-    }
-
-    if (!watchInterval) {
-      broadcast({ type: 'started' }); // Notify all tabs we started
-
-      const runScan = async () => {
-        try {
-          console.log(`[ServiceWorker] Periodic scan running...`);
-          const c = await countAllDirs(currentDirHandles);
-          broadcast({ type: 'done', result: { count: c } });
-        } catch (err) {
-          broadcast({ type: 'error', message: String(err) });
-        }
-      };
-
-      runScan();
-      watchInterval = setInterval(runScan, WATCH_MS);
-    } else {
-      // Already running, just notify this new client
-      event.source.postMessage({ type: 'started' });
-    }
+    
+    backupTimeout = setTimeout(triggerBackup, delayMs);
   }
 
-  // Command: Stop periodic watch
-  if (data.cmd === 'stopWatch') {
-    if (watchInterval) {
-      clearInterval(watchInterval);
-      watchInterval = null;
+  // Command: Cancel scheduled backup
+  if (data.cmd === 'stopBackup') {
+    if (backupTimeout) {
+      clearTimeout(backupTimeout);
+      backupTimeout = null;
+      console.log('[ServiceWorker] Backup schedule cancelled');
       broadcast({ type: 'stopped' });
     }
   }

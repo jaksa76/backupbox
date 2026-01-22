@@ -1,6 +1,16 @@
 # BackupBox PWA
 
-Minimal Progressive Web App scaffold with service worker, manifest, and basic notification demo.
+Progressive Web App for automatic file backup to Fleabox backend. BackupBox monitors selected folders and uploads files to the cloud, maintaining the original directory structure.
+
+## Features
+
+- 📁 **Multiple Folder Backup** - Select and backup multiple folders
+- ☁️ **Cloud Storage** - Files stored on Fleabox backend with same structure
+- 🔄 **Automatic Sync** - Periodic rescans every 5 minutes to detect changes
+- 📱 **Mobile Optimized** - One file at a time with 1s pause to avoid hogging resources
+- 💾 **Incremental Backups** - Only uploads new or modified files
+- 🏷️ **Custom Names** - Assign remote names to folders (useful for duplicates)
+- 📊 **Progress Tracking** - Real-time upload progress and statistics
 
 ## Quick start
 
@@ -17,6 +27,14 @@ fleabox --dev --apps-dir /workspaces/
 ```
 
 then open http://localhost:3000/backupbox/
+
+## How It Works
+
+1. **Select Folders** - Use the File System Access API to select folders to backup
+2. **Set Remote Names** - Each folder gets a remote name (defaults to local name)
+3. **Start Backup** - Service Worker scans folders and uploads files to `/api/backupbox/data/backups/{remote-name}/`
+4. **Automatic Rescans** - Every 5 minutes, folders are rescanned and changed files are uploaded
+5. **Metadata Tracking** - Each folder has a `metadata.json` tracking file sizes, modification times, and upload status
 
 ## Testing
 
