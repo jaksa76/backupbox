@@ -1,3 +1,28 @@
+// --- Debug Logging ---
+const debugLog = [];
+const MAX_DEBUG_LOGS = 200;
+
+function addDebugLog(message, type = 'info') {
+  const timestamp = new Date().toLocaleTimeString();
+  debugLog.push({ timestamp, message, type });
+  if (debugLog.length > MAX_DEBUG_LOGS) debugLog.shift();
+  
+  // Update debug panel if visible
+  const debugLogEl = document.getElementById('debugLog');
+  if (debugLogEl && document.getElementById('debugPanel').style.display !== 'none') {
+    const color = type === 'error' ? '#ff4444' : type === 'warn' ? '#ffaa00' : type === 'success' ? '#44ff44' : '#00aaff';
+    const entry = document.createElement('div');
+    entry.style.color = color;
+    entry.style.marginBottom = '2px';
+    entry.textContent = `[${timestamp}] ${message}`;
+    debugLogEl.appendChild(entry);
+    debugLogEl.scrollTop = debugLogEl.scrollHeight;
+  }
+  
+  // Also log to real console
+  console.log(`[BackupBox] ${message}`);
+}
+
 // --- UI Elements ---
 const el = {
   status: document.getElementById('status'),
@@ -8,7 +33,11 @@ const el = {
   fileCount: document.getElementById('fileCount'),
   lastSync: document.getElementById('lastSync'),
   progressWrapper: document.getElementById('progressWrapper'),
-  progressBar: document.getElementById('progressBar')
+  progressBar: document.getElementById('progressBar'),
+  debugPanel: document.getElementById('debugPanel'),
+  debugLog: document.getElementById('debugLog'),
+  footer: document.getElementById('footer'),
+  clearDebug: document.getElementById('clearDebug')
 };
 
 // --- State Management ---
@@ -258,15 +287,22 @@ function handleWorkerMessage(ev) {
 }
 
 async function startBackup() {
+  addDebugLog('=== BACKUP STARTED ===', 'success');
+  
   if (state.folderConfigs.length === 0) {
     setStatus('No folders selected.');
+    addDebugLog('No folders selected', 'warn');
     return;
   }
 
+  addDebugLog(`Checking permissions for ${state.folderConfigs.length} folders...`, 'info');
   // Check permissions for all folders
   const results = await Promise.all(state.folderConfigs.map(c => c.handle.queryPermission({ mode: 'readwrite' })));
+  addDebugLog(`Permission results: ${results.join(', ')}`, 'info');
+  
   if (results.some(r => r !== 'granted')) {
     setStatus('Please authorize all folders before starting.');
+    addDebugLog('Permission denied for some folders', 'error');
     updateUI();
     return;
   }
@@ -274,6 +310,7 @@ async function startBackup() {
   state.isWorking = true;
   updateUI();
   setStatus('Starting backup process...');
+  addDebugLog('Starting backup for: ' + state.folderConfigs.map(c => `${c.handle.name} -> ${c.remoteName}`).join(', '), 'info');
   console.log('[App] Starting backup for:', state.folderConfigs.map(c => `${c.handle.name} -> ${c.remoteName}`));
 
   // Import backup engine dynamically
@@ -287,7 +324,8 @@ async function startBackup() {
         el.progressBar.style.width = `${percent}%`;
         const fileName = currentFile ? ` (${currentFile})` : '';
         setStatus(`Uploading: ${done}/${total}${fileName}`);
-      }
+      },
+      (message, type = 'info') => addDebugLog(message, type)
     );
     
     // Update UI with results
@@ -328,6 +366,55 @@ function stopBackup() {
 el.pickBtn.addEventListener('click', addFolder);
 el.startBtn.addEventListener('click', startBackup);
 el.stopBtn.addEventListener('click', stopBackup);
+
+// Debug panel - toggle on footer click
+el.footer.addEventListener('click', () => {
+  const isVisible = el.debugPanel.style.display !== 'none';
+  el.debugPanel.style.display = isVisible ? 'none' : 'block';
+  
+  // Render existing logs if opening
+  if (!isVisible) {
+    el.debugLog.innerHTML = '';
+    debugLog.forEach(log => {
+      const color = log.type === 'error' ? '#ff4444' : log.type === 'warn' ? '#ffaa00' : log.type === 'success' ? '#44ff44' : '#00aaff';
+      const entry = document.createElement('div');
+      entry.style.color = color;
+      entry.style.marginBottom = '2px';
+      entry.textContent = `[${log.timestamp}] ${log.message}`;
+      el.debugLog.appendChild(entry);
+    });
+    el.debugLog.scrollTop = el.debugLog.scrollHeight;
+  }
+});
+
+el.clearDebug.addEventListener('click', () => {
+  debugLog.length = 0;
+  el.debugLog.innerHTML = '';
+  addDebugLog('Debug log cleared', 'info');
+});
+
+// Force reload button - unregister SW and reload
+const forceReloadBtn = document.getElementById('forceReload');
+if (forceReloadBtn) {
+  forceReloadBtn.addEventListener('click', async () => {
+    addDebugLog('Force reloading app...', 'warn');
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const registration of registrations) {
+        await registration.unregister();
+        addDebugLog('Service Worker unregistered', 'success');
+      }
+    }
+    // Clear all caches
+    const cacheNames = await caches.keys();
+    for (const name of cacheNames) {
+      await caches.delete(name);
+      addDebugLog(`Cache deleted: ${name}`, 'success');
+    }
+    addDebugLog('Reloading in 1 second...', 'info');
+    setTimeout(() => location.reload(true), 1000);
+  });
+}
 
 // --- Initialization ---
 (async () => {

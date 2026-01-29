@@ -1,4 +1,4 @@
-const CACHE_NAME = 'backupbox-v3';
+const CACHE_NAME = 'backupbox-v4-debug';
 const ASSETS = [
   '/backupbox/',
   '/backupbox/index.html',

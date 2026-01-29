@@ -106,24 +106,75 @@ async function uploadFile(remoteName, relativePath, file) {
  * @param {string} basePath - Base path for building relative paths
  * @returns {Promise<Array>} Array of {path, file, handle} objects
  */
-async function collectFiles(dirHandle, basePath = '') {
+async function collectFiles(dirHandle, basePath = '', onDebug = console.log) {
   const files = [];
+  onDebug(`Collecting from: ${basePath || '(root)'}, dirHandle.name: ${dirHandle.name}`);
   
+  // Verify we still have permission to the directory
   try {
-    for await (const entry of dirHandle.values()) {
-      const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
-      
-      if (entry.kind === 'file') {
-        const fileHandle = entry;
-        const file = await fileHandle.getFile();
-        files.push({ path: relativePath, file, handle: fileHandle });
-      } else if (entry.kind === 'directory') {
-        const subFiles = await collectFiles(entry, relativePath);
-        files.push(...subFiles);
+    const dirPermission = await dirHandle.queryPermission({ mode: 'read' });
+    onDebug(`Directory permission: ${dirPermission}`);
+    if (dirPermission !== 'granted') {
+      onDebug(`Requesting directory permission...`);
+      const newPermission = await dirHandle.requestPermission({ mode: 'read' });
+      onDebug(`New directory permission: ${newPermission}`);
+      if (newPermission !== 'granted') {
+        onDebug(`ERROR: Directory permission denied`, 'error');
+        return files;
       }
     }
   } catch (err) {
-    console.warn(`[BackupEngine] Error scanning directory at ${basePath}:`, err);
+    onDebug(`Warning: Could not check directory permission: ${err.message}`, 'warn');
+  }
+  
+  try {
+    onDebug(`Trying to iterate dirHandle.values()...`);
+    
+    // Collect all entry names first, then process them
+    const entries = [];
+    for await (const entry of dirHandle.values()) {
+      entries.push({ name: entry.name, kind: entry.kind, handle: entry });
+    }
+    onDebug(`Found ${entries.length} entries in directory`);
+    
+    // Now process each entry
+    let entryCount = 0;
+    for (const { name, kind, handle: entry } of entries) {
+      entryCount++;
+      const relativePath = basePath ? `${basePath}/${name}` : name;
+      onDebug(`Processing entry ${entryCount}/${entries.length}: ${name} (${kind})`);
+      
+      if (kind === 'file') {
+        try {
+          // Re-get the file handle from the parent directory
+          onDebug(`Getting file handle for: ${name}`);
+          const fileHandle = await dirHandle.getFileHandle(name);
+          onDebug(`Got file handle for ${name}`);
+          
+          const file = await fileHandle.getFile();
+          onDebug(`Successfully read file: ${file.name}, size: ${file.size} bytes`);
+          files.push({ path: relativePath, file, handle: fileHandle });
+        } catch (err) {
+          onDebug(`ERROR getting file ${name}: ${err.name} - ${err.message}`, 'error');
+          onDebug(`This might be a browser limitation on mobile`, 'warn');
+        }
+      } else if (kind === 'directory') {
+        try {
+          onDebug(`Getting directory handle for: ${name}`);
+          const subDirHandle = await dirHandle.getDirectoryHandle(name);
+          onDebug(`Recursing into: ${name}`);
+          const subFiles = await collectFiles(subDirHandle, relativePath, onDebug);
+          onDebug(`Got ${subFiles.length} files from ${name}`);
+          files.push(...subFiles);
+        } catch (err) {
+          onDebug(`ERROR accessing directory ${name}: ${err.name} - ${err.message}`, 'error');
+        }
+      }
+    }
+    onDebug(`Processed ${entryCount} entries, collected ${files.length} files from ${basePath || '(root)'}`);
+  } catch (err) {
+    onDebug(`ERROR scanning directory at ${basePath}: ${err.name} - ${err.message}`, 'error');
+    onDebug(`Error stack: ${err.stack}`, 'error');
   }
   
   return files;
@@ -175,24 +226,32 @@ function filterFilesNeedingBackup(localFiles, metadata) {
  * @param {FileSystemDirectoryHandle} dirHandle - Local directory to backup
  * @param {string} remoteName - Remote folder name for storage
  * @param {Function} onProgress - Progress callback (current, total, currentFile)
+ * @param {Function} onDebug - Debug logging callback
  * @returns {Promise<object>} Backup results
  */
-export async function backupFolder(dirHandle, remoteName, onProgress = () => {}) {
-  console.log(`[BackupEngine] Starting backup of ${dirHandle.name} -> ${remoteName}`);
-  console.log(`[BackupEngine] dirHandle type:`, dirHandle?.kind, 'remoteName:', remoteName);
+export async function backupFolder(dirHandle, remoteName, onProgress = () => {}, onDebug = console.log) {
+  onDebug(`Starting backup of ${dirHandle.name} -> ${remoteName}`);
+  onDebug(`dirHandle.kind: ${dirHandle?.kind}, remoteName: ${remoteName}`);
+  onDebug(`dirHandle.values is function: ${typeof dirHandle.values === 'function'}`);
   
   // Load existing metadata
   const metadata = await getBackupMetadata(remoteName);
-  console.log(`[BackupEngine] Loaded metadata:`, metadata);
+  onDebug(`Loaded metadata with ${Object.keys(metadata.files || {}).length} existing files`);
   
   // Collect all files from local directory
-  console.log(`[BackupEngine] Collecting files from directory...`);
-  const allFiles = await collectFiles(dirHandle);
-  console.log(`[BackupEngine] Found ${allFiles.length} local files`);
+  onDebug(`Calling collectFiles...`);
+  
+  const allFiles = await collectFiles(dirHandle, '', onDebug);
+  onDebug(`collectFiles returned ${allFiles.length} files`);
+  if (allFiles.length > 0) {
+    onDebug(`First 10 files: ${allFiles.slice(0, 10).map(f => f.path).join(', ')}`);
+  } else {
+    onDebug(`WARNING: No files found in directory!`);
+  }
   
   // Determine which files need backup
   const filesToBackup = filterFilesNeedingBackup(allFiles, metadata);
-  console.log(`[BackupEngine] ${filesToBackup.length} files need backup`);
+  onDebug(`${filesToBackup.length} files need backup`);
   
   let uploaded = 0;
   let skipped = 0;
@@ -254,9 +313,10 @@ export async function backupFolder(dirHandle, remoteName, onProgress = () => {})
  * Backup multiple folders
  * @param {Array} folderConfigs - Array of {handle, remoteName}
  * @param {Function} onProgress - Progress callback
+ * @param {Function} onDebug - Debug logging callback
  * @returns {Promise<object>} Combined results
  */
-export async function backupMultipleFolders(folderConfigs, onProgress = () => {}) {
+export async function backupMultipleFolders(folderConfigs, onProgress = () => {}, onDebug = console.log) {
   const results = {
     uploaded: 0,
     skipped: 0,
@@ -265,16 +325,19 @@ export async function backupMultipleFolders(folderConfigs, onProgress = () => {}
     totalFiles: 0
   };
   
+  onDebug(`Starting backup of ${folderConfigs.length} folders`);
+  
   for (const { handle, remoteName } of folderConfigs) {
     try {
-      const result = await backupFolder(handle, remoteName, onProgress);
+      onDebug(`Backing up folder: ${handle.name} -> ${remoteName}`);
+      const result = await backupFolder(handle, remoteName, onProgress, onDebug);
       results.uploaded += result.uploaded;
       results.skipped += result.skipped;
       results.failed += result.failed;
       results.totalBytes += result.totalBytes;
       results.totalFiles = result.totalFiles; // This will be cumulative via metadata
     } catch (err) {
-      console.error(`[BackupEngine] Failed to backup ${remoteName}:`, err);
+      onDebug(`ERROR backing up ${remoteName}: ${err.message}`, 'error');
       results.failed++;
     }
   }
