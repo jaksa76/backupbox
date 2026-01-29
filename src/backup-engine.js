@@ -59,40 +59,13 @@ async function uploadFile(remoteName, relativePath, file) {
   const encodedPath = relativePath.split('/').map(encodeURIComponent).join('/');
   const url = `/api/${APP_ID}/data/backups/${encodeURIComponent(remoteName)}/${encodedPath}`;
   
-  // For non-JSON files, we need to handle them as binary
-  const isText = file.type.startsWith('text/') || 
-                 file.type === 'application/json' ||
-                 file.type === 'application/javascript';
-  
-  let body;
-  if (isText) {
-    body = await file.text();
-  } else {
-    // For binary files, read as ArrayBuffer and send as base64-encoded JSON
-    const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    
-    // Convert to base64 in chunks to avoid stack overflow
-    let base64 = '';
-    const chunkSize = 8192;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      const chunk = bytes.slice(i, i + chunkSize);
-      base64 += String.fromCharCode.apply(null, chunk);
-    }
-    base64 = btoa(base64);
-    
-    body = JSON.stringify({ 
-      _binary: true, 
-      data: base64, 
-      type: file.type,
-      name: file.name 
-    });
-  }
+  // Send file directly with appropriate Content-Type
+  const contentType = file.type || 'application/octet-stream';
   
   const response = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': isText ? 'text/plain' : 'application/json' },
-    body: body
+    headers: { 'Content-Type': contentType },
+    body: file
   });
   
   if (!response.ok) {
