@@ -6,7 +6,7 @@
 	"image": "mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm",
 
 	// Run after container creation: install fleabox into the user's local bin
-	"postCreateCommand": "mkdir -p $HOME/.local/bin && curl -fsSL -o $HOME/.local/bin/fleabox https://github.com/jaksa76/fleabox/releases/download/v1.1/fleabox && chmod +x $HOME/.local/bin/fleabox && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> $HOME/.bashrc || true",
+	"postCreateCommand": "mkdir -p $HOME/.local/bin && curl -fsSL -o $HOME/.local/bin/fleabox https://github.com/jaksa76/fleabox/releases/download/v2.0/fleabox && chmod +x $HOME/.local/bin/fleabox && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> $HOME/.bashrc || true",
 	"features": {
 		"ghcr.io/schlich/devcontainer-features/playwright:0": {}
 	},
